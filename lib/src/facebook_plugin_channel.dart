@@ -14,7 +14,8 @@ class FacebookPluginChannel {
     _channel.setMethodCallHandler(_handleMethodCall);
 
     invokeMethodNow<bool>(PluginMethod.isReady).then((value) {
-      if (value == true) _ready();
+      //if (value == true) _ready();
+      _ready();
     });
   }
 
