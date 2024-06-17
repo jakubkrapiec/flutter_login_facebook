@@ -1,3 +1,13 @@
+## 2.0.1
+
+* Upgrade Facebook iOS SDK to 17.0.2. 
+* [iOS] Reset `isLimitedLogin` flag on login if no `authenticationToken` (see issue [#12](https://github.com/Innim/flutter_login_facebook/issues/112)).
+* [iOS] Auto logout if missed `authenticationToken` data while limited login mode.
+* [iOS] Return profile data and email from authentication token in Limited Login if no current Profile data.
+* [iOS] **Fixed**: `firstName` instead of `middleName` in profile on iOS.
+
+This includes minor update of native SDK, so see [Migration guide](UPGRADE.md#Upgrade-to-2-0-1).
+
 ## 2.0.0
 
 * Upgrade Facebook Android SDK to 17.0.0. 
@@ -6,7 +16,7 @@
 * [Android] Fixed: `expressLogin()` invokes standard login process.
 * Min Flutter SDK **2.8.0**.
 
-See [Migration guide](UPGRADE.md#Upgrade-to-1-10).
+See [Migration guide](UPGRADE.md#Upgrade-to-2-0).
 
 ⚠️ **BREAKING!** Important Changes in SDK v17.0 for iOS
 

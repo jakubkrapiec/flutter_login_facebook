@@ -139,7 +139,7 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
     private func onFbReady() {
         let fbDelegate = ApplicationDelegate.shared
         fbDelegate.addObserver(_initObserver)
-        
+
         _isReady = true
         _channel.invokeMethod(PluginDartMethod.ready.rawValue, arguments: nil)
     }
@@ -161,25 +161,53 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
     
     private func getAccessToken(result: @escaping FlutterResult) {
         if let token = AccessToken.current, !token.isExpired {
-            result(accessTokenToMap(token: token, authenticationToken: AuthenticationToken.current, isLimitedLogin: loadIsLimitedLogin()))
+            let authenticationToken = AuthenticationToken.current
+            let isLimitedLogin = loadIsLimitedLogin()
+            
+            if isLimitedLogin, authenticationToken == nil {
+                print("[WARNING] isLimitedLogin = TRUE, but authenticationToken is nil. Invoke logout")
+                doLogOut()
+                result(nil)
+            } else {
+                result(accessTokenToMap(token: token, authenticationToken: authenticationToken, isLimitedLogin: isLimitedLogin))
+            }
         } else {
             result(nil)
         }
     }
     
     private func getUserProfile(result: @escaping FlutterResult) {
+        let isLimitedLogin = loadIsLimitedLogin()
+        if isLimitedLogin {
+            // If we use a Limited Login than loadCurrentProfile() will not work,
+            // so check current and if it is nil, then we get data from AuthenticationToken
+            let data: [String: Any?]?
+            if let profile = Profile.current {
+                data = profileToMap(profile)
+            } else if let authenticationToken = AuthenticationToken.current,
+                let claims = parseAuthenticationToken(authenticationToken) {
+                data = [
+                    "userId" : claims.sub,
+                    "name" : claims.name,
+                    "firstName" : claims.givenName,
+                    "middleName" : claims.middleName,
+                    "lastName" : claims.familyName,
+                ]
+            } else {
+                data = nil
+            }
+            
+            // If no data than try to make load request
+            if data != nil {
+                result(data)
+                return
+            }
+        }
+        
         Profile.loadCurrentProfile { profile, error in
             switch (profile, error) {
             case let (profile?, nil):
-                let data: [String: Any?] = [
-                    "userId" : profile.userID,
-                    "name" : profile.name,
-                    "firstName" : profile.firstName,
-                    "middleName" : profile.firstName,
-                    "lastName" : profile.lastName,
-                ]
-                
-                result(data)
+                result(self.profileToMap(profile))
             case let (nil, error?):
                 result(FlutterError(code: "FAILED",
                                     message: "Can't get profile: \(error)",
@@ -199,6 +227,18 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
                 return
             }
         }
+        
+        let isLimitedLogin = loadIsLimitedLogin()
+        if isLimitedLogin,
+           let authenticationToken = AuthenticationToken.current,
+           let claims = parseAuthenticationToken(authenticationToken) {
+            // If we use a Limited Login than graph request will not work,
+            // so get data from AuthenticationToken
+            let email = claims.email
+            result(email)
+            return
+        }
+        
         
         let graphRequest : GraphRequest = GraphRequest(graphPath: "me", parameters: ["fields": "email"])
         graphRequest.start(completion: { (connection, res, error) -> Void in
@@ -271,7 +311,7 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
         // and there is not way no know about this.
         // So, as a temporary workaround, we will make the same checks as FB SDK does.
         // https://github.com/facebook/facebook-ios-sdk/blob/7aa39da29eca817495cecf1f9fa831f023208c63/FBSDKLoginKit/FBSDKLoginKit/LoginManager.swift#L570
-        let isLimitedLogin = _DomainHandler.sharedInstance().isDomainHandlingEnabled() && !Settings.shared.isAdvertiserTrackingEnabled
+        var isLimitedLogin = _DomainHandler.sharedInstance().isDomainHandlingEnabled() && !Settings.shared.isAdvertiserTrackingEnabled
         
         _loginManager.logIn(configuration: config) { res in
             // TODO: add `granted` and `declined` information
@@ -284,11 +324,18 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
                 status = "Success"
                 
                 let authenticationToken = AuthenticationToken.current
-                if authenticationToken?.nonce != nonce {
-                    // print warning, but process for now
-                    print("[WARNING] Nonce is not match. Expected: \(nonce), got: \(authenticationToken?.nonce ?? "nil")")
+                if isLimitedLogin {
+                    if let oidcToken = authenticationToken {
+                        if oidcToken.nonce != nonce {
+                            // print warning, but process for now
+                            print("[WARNING] Nonce is not match. Expected: \(nonce), got: \(oidcToken.nonce)")
+                        }
+                    } else  {
+                        print("[WARNING] Limited login was defined as TRUE, but no AuthenticationToken after login. Reset isLimitedLogin to FALSE")
+                        isLimitedLogin = false
+                    }
                 }
-                    
+                
                 self.saveIsLimitedLogin(isLimitedLogin)
                 
                 // TODO: check why it's nullable now?
@@ -322,11 +369,15 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
     
     private func logOut(result: @escaping FlutterResult) {
         if isLoggedIn {
-            _loginManager.logOut()
-            saveIsLimitedLogin(false)
+            doLogOut()
         }
         
         result(nil)
+    }
+    
+    private func doLogOut() {
+        _loginManager.logOut()
+        saveIsLimitedLogin(false)
     }
     
     // we need this method, becase token.claims() returns nil for an expired token
@@ -351,6 +402,16 @@ public class SwiftFlutterLoginFacebookPlugin: NSObject, FlutterPlugin {
             "declinedPermissions": token.declinedPermissions.map {item in item.name},
             "authenticationToken": authenticationToken?.tokenString,
             "isLimitedLogin": isLimitedLogin,
+        ]
+    }
+    
+    private func profileToMap(_ profile: Profile) -> [String: Any?] {
+        return [
+            "userId" : profile.userID,
+            "name" : profile.name,
+            "firstName" : profile.firstName,
+            "middleName" : profile.middleName,
+            "lastName" : profile.lastName,
         ]
     }
     
